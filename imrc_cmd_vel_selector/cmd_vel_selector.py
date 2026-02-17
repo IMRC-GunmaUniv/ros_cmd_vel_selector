@@ -8,13 +8,19 @@ from std_msgs.msg import String
 from geometry_msgs.msg import Twist
 
 
+
 class cmd_vel_selector(Node):
 
     def __init__(self):
         super().__init__('cmd_vel_selector')
+        # "STAND BY" or "GO"
+        # "STAND BY"で0,0,0しかでないように、"GO"で普通にcmd_velが出るように
+        self.mode_ready = "STAND BY"
+        self.mode_ready_sub = self.create_subscription(String, '/mode_ready', self.mode_ready_callback, 10)
+        
         
         # 出力先
-        self.pub = self.create_publisher(Twist,'/cmd_vel_uart', 10)
+        self.cmd_vel_uart_pub = self.create_publisher(Twist, '/cmd_vel_uart', 10)
         
         # 現在購読しているsubscriber（最初は None） 
         self.current_sub = None 
@@ -37,7 +43,13 @@ class cmd_vel_selector(Node):
         
         # どの値をcmd_vel_uartに流すか
         self.target_sub = self.create_subscription(String, '/current_vel', self.target_selecter_callback, 10)
-        
+    
+    def mode_ready_callback(self, msg):
+        if(msg.data == "GO"):
+            self.mode_ready = "GO"
+        else:
+            self.mode_ready = "STAND BY"
+
     def target_selecter_callback(self, msg): 
         new_topic = msg.data.strip() 
         self.target_timer = time.time()
@@ -63,9 +75,13 @@ class cmd_vel_selector(Node):
         # self.vel.linear.x = msg.linear.x
         # self.vel.linear.y = msg.linear.y
         # self.vel.angular.z = msg.angular.z
-
-        self.pub.publish(msg) 
-        self.get_logger().info(f'Lx={msg.linear.x} Ly={msg.linear.y} Az={msg.angular.z}')
+        if(self.mode_ready == "GO"):
+            self.cmd_vel_uart_pub.publish(msg)
+            self.get_logger().info(f'MODE = \"GO\", Lx={msg.linear.x} Ly={msg.linear.y} Az={msg.angular.z}')
+        else:
+            self.cmd_vel_uart_pub.publish(self.zero_twist)
+            self.get_logger().info(f'MODE = \"STAND BY\"')
+            self.get_logger().info(f'Receiving: Lx={msg.linear.x} Ly={msg.linear.y} Az={msg.angular.z}')
 
     def watch_timer(self):
         now = time.time()
@@ -84,10 +100,13 @@ class cmd_vel_selector(Node):
                 self.current_sub = None
                 self.current_topic = None
         
-        if self.target_flag == False or self.twist_flag == False:
+        if self.mode_ready == "STAND BY":
+            self.get_logger().info("STAND BY状態のため、cmd_vel_uartは送信されません。")
+            self.cmd_vel_uart_pub.publish(self.zero_twist) 
+        elif (self.target_flag == False) or (self.twist_flag == False):
             self.get_logger().info("入力が検知されませんでした") 
             # self.get_logger().info('Lx=0.0 Ly=0.0 Az=0.0')
-            self.pub.publish(self.zero_twist) 
+            self.cmd_vel_uart_pub.publish(self.zero_twist) 
 
 def main():
     rclpy.init()
